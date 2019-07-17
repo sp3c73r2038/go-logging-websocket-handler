@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"net/url"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/hhkbp2/go-logging"
@@ -30,7 +31,8 @@ func (h *WebsocketHandler) Close() {
 
 func NewWebsocketHandler(
 	name string, addr string,
-	path string, level logging.LogLevelType) *WebsocketHandler {
+	path string, level logging.LogLevelType,
+	keepaliveInterval int) *WebsocketHandler {
 
 	u := url.URL{Scheme: "ws", Host: addr, Path: path}
 
@@ -39,8 +41,36 @@ func NewWebsocketHandler(
 		log.Fatal(err)
 	}
 
+	// keepalive
+	if keepaliveInterval > 0 {
+		keepalive(c, time.Second*time.Duration(keepaliveInterval))
+	}
+
 	return &WebsocketHandler{
 		BaseHandler: logging.NewBaseHandler(name, level),
 		Client:      c,
 	}
+}
+
+func keepalive(c *websocket.Conn, timeout time.Duration) {
+	lastResponse := time.Now()
+	c.SetPongHandler(func(msg string) error {
+		lastResponse = time.Now()
+		return nil
+	})
+
+	go func() {
+		for {
+			err := c.WriteMessage(websocket.PingMessage, []byte("keepalive"))
+			if err != nil {
+				log.Print(err)
+				return
+			}
+			time.Sleep(timeout / 2)
+			if time.Now().Sub(lastResponse) > timeout {
+				c.Close()
+				return
+			}
+		}
+	}()
 }
