@@ -43,6 +43,7 @@ func NewWebsocketHandler(
 
 	// keepalive
 	if keepaliveInterval > 0 {
+		log.Printf("enable keepalive for %d", keepaliveInterval)
 		keepalive(c, time.Second*time.Duration(keepaliveInterval))
 	}
 
