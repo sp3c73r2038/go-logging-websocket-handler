@@ -3,6 +3,7 @@ package handler
 import (
 	"log"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -12,12 +13,19 @@ import (
 type WebsocketHandler struct {
 	*logging.BaseHandler
 	Client *websocket.Conn
+	Lock   *sync.Mutex
+}
+
+func (h *WebsocketHandler) write(messageType int, data []byte) error {
+	h.Lock.Lock()
+	defer h.Lock.Unlock()
+	return h.Client.WriteMessage(messageType, data)
 }
 
 func (h *WebsocketHandler) Emit(record *logging.LogRecord) error {
 	l := h.Format(record)
 	// fmt.Println(l)
-	h.Client.WriteMessage(websocket.TextMessage, []byte(l))
+	h.write(websocket.TextMessage, []byte(l))
 	return nil
 }
 
@@ -32,7 +40,7 @@ func (h *WebsocketHandler) Close() {
 func NewWebsocketHandler(
 	name string, addr string,
 	path string, level logging.LogLevelType,
-	keepaliveInterval int) *WebsocketHandler {
+	timeout time.Duration) *WebsocketHandler {
 
 	u := url.URL{Scheme: "ws", Host: addr, Path: path}
 
@@ -41,35 +49,41 @@ func NewWebsocketHandler(
 		log.Fatal(err)
 	}
 
-	// keepalive
-	if keepaliveInterval > 0 {
-		log.Printf("enable keepalive for %d", keepaliveInterval)
-		keepalive(c, time.Second*time.Duration(keepaliveInterval))
-	}
-
-	return &WebsocketHandler{
+	rv := &WebsocketHandler{
 		BaseHandler: logging.NewBaseHandler(name, level),
 		Client:      c,
+		Lock:        &sync.Mutex{},
 	}
+	rv.keepalive(timeout)
+	return rv
 }
 
-func keepalive(c *websocket.Conn, timeout time.Duration) {
+func (h *WebsocketHandler) keepalive(timeout time.Duration) {
+
+	if timeout <= 0 {
+		return
+	}
+
+	log.Printf("enable keepalive for %s", timeout)
+
 	lastResponse := time.Now()
-	c.SetPongHandler(func(msg string) error {
+	h.Client.SetPongHandler(func(msg string) error {
 		lastResponse = time.Now()
 		return nil
 	})
 
 	go func() {
 		for {
-			err := c.WriteMessage(websocket.PingMessage, []byte("keepalive"))
+			err := h.write(websocket.PingMessage, []byte("keepalive"))
 			if err != nil {
 				log.Print(err)
 				return
 			}
 			time.Sleep(timeout / 2)
-			if time.Now().Sub(lastResponse) > timeout {
-				c.Close()
+			diff := time.Now().Sub(lastResponse)
+			if diff > timeout {
+				log.Printf("diff: %s, timeout: %s, close connection", diff, timeout)
+				h.Client.Close()
 				return
 			}
 		}
