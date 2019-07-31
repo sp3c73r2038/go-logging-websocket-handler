@@ -6,7 +6,6 @@ handler := NewWebsocketHandler(
     "127.0.0.1:5577", // host
 	"/logs/channel/attendance",  // path
 	logging.LevelTrace,  // level
-	5, // keepalive interval
 )
 
 format := "%(asctime)s %(levelname)s (%(filename)s:%(lineno)d) " +
